@@ -457,7 +457,56 @@ elif page == "Variablen editor":
             st.markdown("**Ausstehende Änderungen:**")
             for k, v in st.session_state["pending_changes"].items():
                 lbl = INPUT_CELL_LABELS.get(k, k)
-                st.markdown(f"- `{k}` {lbl}: **{v}**")
+                col_l, col_r = st.columns([6, 1])
+                col_l.markdown(f"- `{k}` {lbl}: **{v}**")
+                if col_r.button("✕", key=f"del_{k}", help=f"{k} entfernen"):
+                    del st.session_state["pending_changes"][k]
+                    st.rerun()
+
+            st.divider()
+            st.markdown("**Als Szenario speichern & Excel erstellen**")
+            sc1, sc2 = st.columns([3, 1])
+            with sc1:
+                save_name = st.text_input(
+                    "Szenario-Name",
+                    value="Mein_Szenario",
+                    key="pending_save_name",
+                    label_visibility="collapsed",
+                    placeholder="Szenario-Name (ohne Leerzeichen)",
+                )
+            with sc2:
+                save_btn = st.button("💾 Excel erstellen", type="primary", use_container_width=True)
+
+            if save_btn:
+                if not save_name.strip():
+                    st.error("Bitte einen Szenario-Namen eingeben.")
+                else:
+                    with st.spinner(f"Erstelle Excel für '{save_name}'..."):
+                        try:
+                            os.chdir(ROOT)
+                            wb_save, applied_save = apply_scenario(
+                                {"Inputs": st.session_state["pending_changes"]},
+                                szenario=None,
+                            )
+                            filepath_save = save_scenario(wb_save, save_name.strip())
+                            wb_kpi = openpyxl.load_workbook(TEMPLATE_PATH, data_only=True)
+                            kpis_save = read_baseline_kpis(wb_kpi)
+                            _, report_text = generate_delta_report(save_name.strip(), applied_save, kpis_save, filepath_save)
+                            st.success(f"Excel gespeichert: `{filepath_save}`")
+                            with open(filepath_save, "rb") as f:
+                                st.download_button(
+                                    label="⬇ Excel herunterladen",
+                                    data=f,
+                                    file_name=Path(filepath_save).name,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
+                            with st.expander("Delta-Bericht"):
+                                st.text(report_text)
+                            st.session_state["pending_changes"] = {}
+                        except Exception as e:
+                            st.error(f"Fehler beim Erstellen: {e}")
+
+            st.divider()
             if st.button("Alle ausstehenden Änderungen löschen"):
                 st.session_state["pending_changes"] = {}
                 st.rerun()
