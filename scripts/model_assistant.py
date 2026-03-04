@@ -9,6 +9,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 
+# .env Datei laden falls vorhanden (Windows-freundlich)
+_env_file = ROOT / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip())
+
 # System-Prompt aus CLAUDE.md laden
 _claude_md = ROOT / "CLAUDE.md"
 if _claude_md.exists():

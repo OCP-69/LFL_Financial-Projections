@@ -16,9 +16,49 @@ import os
 from datetime import datetime
 from copy import copy
 
-TEMPLATE_PATH = "templates/template_v0.4.xlsx"
-SCENARIOS_DIR = "scenarios"
-REPORTS_DIR = "reports"
+TEMPLATE_PATH        = "templates/template_v0.4.xlsx"
+CUSTOM_BASELINE_PATH = "templates/baseline_custom.xlsx"
+SCENARIOS_DIR        = "scenarios"
+REPORTS_DIR          = "reports"
+
+
+def get_active_template():
+    """Gibt den Pfad der aktiven Basis zurück (Custom oder Original)."""
+    if os.path.exists(CUSTOM_BASELINE_PATH):
+        return CUSTOM_BASELINE_PATH
+    return TEMPLATE_PATH
+
+
+def save_as_custom_baseline(changes_inputs):
+    """
+    Schreibt geänderte Inputs in eine Custom-Basis-Datei (kein Szenario-Präfix).
+    Gibt den Pfad zurück.
+    """
+    import shutil
+    # Vom Original-Template starten (nicht von einer ggf. alten Custom-Basis)
+    wb = openpyxl.load_workbook(TEMPLATE_PATH, data_only=False)
+    ws_inputs = wb['Inputs']
+
+    for cell_ref, new_val in changes_inputs.items():
+        row = int(cell_ref[1:])
+        old_val = ws_inputs.cell(row=row, column=2).value
+        if isinstance(old_val, str) and old_val.startswith('='):
+            continue  # Formeln nicht überschreiben
+        ws_inputs.cell(row=row, column=2).value = new_val
+
+    os.makedirs(os.path.dirname(CUSTOM_BASELINE_PATH), exist_ok=True)
+    wb.save(CUSTOM_BASELINE_PATH)
+    return CUSTOM_BASELINE_PATH
+
+
+def delete_custom_baseline():
+    """Löscht die Custom-Basis — Tool fällt zurück auf Original-Template."""
+    if os.path.exists(CUSTOM_BASELINE_PATH):
+        os.remove(CUSTOM_BASELINE_PATH)
+
+
+def is_custom_baseline_active():
+    return os.path.exists(CUSTOM_BASELINE_PATH)
 
 # Mapping: editierbare Input-Zellen (Inputs-Sheet, Spalte B)
 INPUT_CELL_LABELS = {
@@ -240,11 +280,12 @@ def apply_scenario(changes_dict, szenario=None):
     changes_dict: {"Inputs": {"B28": 0.12, "B21": 0.03}, "Sandbox": {"B1": "stark"}}
     szenario: "gering" | "normal" | "stark" (Shortcut für Sandbox!B1)
     """
-    if not os.path.exists(TEMPLATE_PATH):
-        raise FileNotFoundError(f"Template nicht gefunden: {TEMPLATE_PATH}")
+    active_tpl = get_active_template()
+    if not os.path.exists(active_tpl):
+        raise FileNotFoundError(f"Template nicht gefunden: {active_tpl}")
 
     # Template laden (Formeln erhalten)
-    wb = openpyxl.load_workbook(TEMPLATE_PATH, data_only=False)
+    wb = openpyxl.load_workbook(active_tpl, data_only=False)
     ws_inputs = wb['Inputs']
     ws_sandbox = wb['00_Input_Sandbox']
 

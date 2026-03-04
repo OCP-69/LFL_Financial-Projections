@@ -21,25 +21,37 @@ from scenario_engine import (
     generate_delta_report,
     read_current_inputs,
     read_baseline_kpis,
+    save_as_custom_baseline,
+    delete_custom_baseline,
+    is_custom_baseline_active,
+    get_active_template,
     INPUT_CELL_LABELS,
     SANDBOX_CELL_LABELS,
-    TEMPLATE_PATH as _TEMPLATE_PATH,
+    TEMPLATE_PATH        as _TEMPLATE_PATH,
+    CUSTOM_BASELINE_PATH as _CUSTOM_BASELINE_PATH,
 )
 
-TEMPLATE_PATH = str(ROOT / _TEMPLATE_PATH)
-REPORTS_DIR   = str(ROOT / "reports")
-SCENARIOS_DIR = str(ROOT / "scenarios")
+TEMPLATE_PATH        = str(ROOT / _TEMPLATE_PATH)
+CUSTOM_BASELINE_PATH = str(ROOT / _CUSTOM_BASELINE_PATH)
+REPORTS_DIR          = str(ROOT / "reports")
+SCENARIOS_DIR        = str(ROOT / "scenarios")
 
 # ── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
+def _active_tpl_path():
+    """Gibt den absoluten Pfad der aktiv genutzten Basis zurück."""
+    if Path(CUSTOM_BASELINE_PATH).exists():
+        return CUSTOM_BASELINE_PATH
+    return TEMPLATE_PATH
+
 @st.cache_data(show_spinner=False)
-def load_current_inputs():
-    wb = openpyxl.load_workbook(TEMPLATE_PATH, data_only=False)
+def load_current_inputs(_cache_key=0):
+    wb = openpyxl.load_workbook(_active_tpl_path(), data_only=False)
     return read_current_inputs(wb)
 
 @st.cache_data(show_spinner=False)
-def load_baseline_kpis():
-    wb = openpyxl.load_workbook(TEMPLATE_PATH, data_only=True)
+def load_baseline_kpis(_cache_key=0):
+    wb = openpyxl.load_workbook(_active_tpl_path(), data_only=True)
     return read_baseline_kpis(wb)
 
 def fmt_eur(v):
@@ -136,6 +148,39 @@ with st.sidebar:
     )
 
     st.divider()
+    st.markdown("**Anthropic API-Key**")
+    api_key_input = st.text_input(
+        "API-Key",
+        value=st.session_state.get("anthropic_api_key", ""),
+        type="password",
+        placeholder="sk-ant-api03-...",
+        label_visibility="collapsed",
+        help="Nur für den Assistent-Tab nötig. Key wird nur im Browser gespeichert, nie übertragen.",
+    )
+    if api_key_input:
+        st.session_state["anthropic_api_key"] = api_key_input
+        os.environ["ANTHROPIC_API_KEY"] = api_key_input
+        st.caption("Key gesetzt.")
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        st.caption("Key aus Umgebung geladen.")
+    else:
+        st.caption("Kein Key — Assistent inaktiv.")
+
+    st.divider()
+    st.markdown("**Aktive Basis**")
+    if Path(CUSTOM_BASELINE_PATH).exists():
+        st.success("Custom-Basis aktiv")
+        st.caption("Inputs wurden überschrieben.")
+        if st.button("Zurück zu Original-Basis", use_container_width=True):
+            os.chdir(ROOT)
+            delete_custom_baseline()
+            st.session_state["basis_cache_key"] = st.session_state.get("basis_cache_key", 0) + 1
+            st.cache_data.clear()
+            st.rerun()
+    else:
+        st.info("Original-Basis (template_v0.4)")
+
+    st.divider()
     if st.button("Cache leeren / Neu laden", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -144,13 +189,20 @@ with st.sidebar:
 # PAGE 1: DASHBOARD
 # ─────────────────────────────────────────────────────────────────────────────
 
+_ck = st.session_state.get("basis_cache_key", 0)
+
 if page == "Dashboard":
+    is_custom = Path(CUSTOM_BASELINE_PATH).exists()
+    basis_label = "Custom-Basis (geänderte Inputs)" if is_custom else "template_v0.4.xlsx (Original)"
     st.title("Dashboard — LFL Financial Projections")
-    st.caption(f"Basis: template_v0.4.xlsx · Aktualisiert: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    st.caption(f"Basis: {basis_label} · Aktualisiert: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    if is_custom:
+        st.info("Custom-Basis aktiv — Inputs wurden manuell geändert. Szenarien basieren auf diesen Werten."
+                " Zurücksetzen über die Sidebar.")
 
     with st.spinner("Lade Modell-Daten..."):
-        inputs   = load_current_inputs()
-        kpis     = load_baseline_kpis()
+        inputs   = load_current_inputs(_ck)
+        kpis     = load_baseline_kpis(_ck)
 
     # ── Aktives Szenario ──────────────────────────────────────────────────────
     szenario_val = inputs.get("SANDBOX_B1", {}).get("value", "?")
@@ -395,53 +447,161 @@ elif page == "Variablen editor":
         selected_group = st.selectbox("Gruppe filtern", ["Alle"] + list(groups.keys()))
 
         rows = []
-        show_cells = []
         for cell_ref, label in INPUT_CELL_LABELS.items():
             if selected_group != "Alle":
                 if cell_ref not in groups.get(selected_group, []):
                     continue
             info = inputs.get(cell_ref, {})
             val  = info.get("value")
+            pending_val = st.session_state.get("pending_changes", {}).get(cell_ref)
             if isinstance(val, str) and val.startswith("[FORMEL"):
-                rows.append({"Zelle": cell_ref, "Bezeichnung": label, "Aktueller Wert": "FORMEL (VLOOKUP)", "Editierbar": False})
+                rows.append({"Zelle": cell_ref, "Bezeichnung": label,
+                              "Aktueller Wert": "FORMEL (VLOOKUP)", "Geändert auf": "—", "Editierbar": False})
             else:
-                rows.append({"Zelle": cell_ref, "Bezeichnung": label, "Aktueller Wert": val, "Editierbar": True})
-            show_cells.append(cell_ref)
+                rows.append({"Zelle": cell_ref, "Bezeichnung": label,
+                              "Aktueller Wert": val,
+                              "Geändert auf": str(pending_val) if pending_val is not None else "—",
+                              "Editierbar": True})
 
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, height=420)
+        df = pd.DataFrame(rows).drop(columns=["Editierbar"])
+        st.dataframe(df, use_container_width=True, height=380)
 
         st.divider()
-        st.markdown("**Einzelne Zelle direkt bearbeiten**")
+        st.markdown("**Wert ändern**")
         c1, c2, c3 = st.columns([1, 2, 1])
+        editable_cells = [r["Zelle"] for r in rows if r["Editierbar"]]
         with c1:
-            edit_cell = st.selectbox("Zelle", [r["Zelle"] for r in rows if r["Editierbar"]])
+            edit_cell = st.selectbox("Zelle", editable_cells, key="edit_cell_select")
         with c2:
             current_label = next((r["Bezeichnung"] for r in rows if r["Zelle"] == edit_cell), "")
             current_val   = inputs.get(edit_cell, {}).get("value", "")
-            new_edit_val  = st.text_input(f"{current_label}", value=str(current_val) if current_val is not None else "")
+            new_edit_val  = st.text_input(current_label,
+                                          value=str(current_val) if current_val is not None else "",
+                                          key="edit_val_input")
         with c3:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Zum Szenario hinzufügen", use_container_width=True):
+            if st.button("Hinzufügen", use_container_width=True, key="btn_add_change"):
                 if "pending_changes" not in st.session_state:
                     st.session_state["pending_changes"] = {}
                 try:
                     v = float(new_edit_val)
-                    if v == int(v):
-                        v = int(v)
+                    if v == int(v): v = int(v)
                 except ValueError:
                     v = new_edit_val
                 st.session_state["pending_changes"][edit_cell] = v
-                st.success(f"{edit_cell} = {v} zur Warteschlange hinzugefügt.")
+                st.rerun()
 
-        if st.session_state.get("pending_changes"):
-            st.markdown("**Ausstehende Änderungen:**")
-            for k, v in st.session_state["pending_changes"].items():
+        # ── Ausstehende Änderungen ─────────────────────────────────────────
+        pending = st.session_state.get("pending_changes", {})
+        if pending:
+            st.divider()
+            st.markdown(f"**Ausstehende Änderungen ({len(pending)})**")
+            for k, v in list(pending.items()):
                 lbl = INPUT_CELL_LABELS.get(k, k)
-                st.markdown(f"- `{k}` {lbl}: **{v}**")
-            if st.button("Alle ausstehenden Änderungen löschen"):
+                col_l, col_r = st.columns([7, 1])
+                col_l.markdown(f"- `{k}` **{lbl}**: {inputs.get(k,{}).get('value','?')} → **{v}**")
+                if col_r.button("✕", key=f"del_{k}"):
+                    del st.session_state["pending_changes"][k]
+                    st.rerun()
+
+            st.divider()
+
+            # ── Option A: Als neue Basis setzen ───────────────────────────
+            st.markdown("### Option A — Als neue Basiswerte setzen")
+            st.caption(
+                "Die geänderten Inputs werden zur neuen Basis. "
+                "Dashboard und alle Szenarien nutzen dann diese Werte."
+            )
+            if st.button("✅ Als neue Basis übernehmen", type="primary", key="btn_set_basis"):
+                with st.spinner("Speichere Custom-Basis..."):
+                    try:
+                        os.chdir(ROOT)
+                        save_as_custom_baseline(st.session_state["pending_changes"])
+                        st.session_state["pending_changes"] = {}
+                        st.session_state["basis_cache_key"] = st.session_state.get("basis_cache_key", 0) + 1
+                        st.cache_data.clear()
+                        st.success("Custom-Basis gespeichert. Dashboard und Szenarien nutzen jetzt diese Werte.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Fehler: {e}")
+
+            st.divider()
+
+            # ── Option B: Als benanntes Szenario exportieren ───────────────
+            st.markdown("### Option B — Als benanntes Szenario exportieren (Excel)")
+            st.caption("Erstellt eine Excel-Datei mit diesen Inputs, ohne die Basis dauerhaft zu ändern.")
+            sc1, sc2 = st.columns([3, 1])
+            with sc1:
+                export_name = st.text_input("Szenario-Name", value="Mein_Szenario",
+                                            key="export_name", label_visibility="collapsed")
+            with sc2:
+                export_btn = st.button("💾 Exportieren", use_container_width=True, key="btn_export_named")
+            if export_btn:
+                with st.spinner("Erstelle Excel..."):
+                    try:
+                        os.chdir(ROOT)
+                        wb_e, applied_e = apply_scenario({"Inputs": pending}, szenario=None)
+                        fp_e = save_scenario(wb_e, export_name.strip() or "Custom")
+                        wb_k = openpyxl.load_workbook(_active_tpl_path(), data_only=True)
+                        kpis_e = read_baseline_kpis(wb_k)
+                        _, rpt_e = generate_delta_report(export_name.strip(), applied_e, kpis_e, fp_e)
+                        st.success(f"Gespeichert: `{fp_e}`")
+                        with open(fp_e, "rb") as fh:
+                            st.download_button("⬇ Herunterladen", fh, Path(fp_e).name,
+                                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        with st.expander("Delta-Bericht"):
+                            st.text(rpt_e)
+                    except Exception as e:
+                        st.error(f"Fehler: {e}")
+
+            st.divider()
+            if st.button("Alle Änderungen verwerfen", key="btn_discard"):
                 st.session_state["pending_changes"] = {}
                 st.rerun()
+
+        # ── Szenarien aus aktiver Basis generieren ─────────────────────────
+        st.divider()
+        st.markdown("### Szenarien aus aktiver Basis exportieren")
+        is_custom = Path(CUSTOM_BASELINE_PATH).exists()
+        basis_info = "Custom-Basis" if is_custom else "Original-Basis (template_v0.4)"
+        st.caption(f"Aktive Basis: **{basis_info}**. Wähle Szenarien zum Exportieren:")
+
+        col_g, col_n, col_s = st.columns(3)
+        do_gering = col_g.checkbox("Gering", value=True, key="chk_gering")
+        do_normal = col_n.checkbox("Normal", value=True, key="chk_normal")
+        do_stark  = col_s.checkbox("Stark",  value=True, key="chk_stark")
+
+        if st.button("📊 Gewählte Szenarien erstellen", type="primary", key="btn_gen_szenarien"):
+            selected = [s for s, do in [("gering", do_gering), ("normal", do_normal), ("stark", do_stark)] if do]
+            if not selected:
+                st.warning("Mindestens ein Szenario auswählen.")
+            else:
+                os.chdir(ROOT)
+                results = {}
+                for sz in selected:
+                    with st.spinner(f"Erstelle Szenario '{sz}'..."):
+                        try:
+                            wb_sz, applied_sz = apply_scenario({}, szenario=sz)
+                            fp_sz = save_scenario(wb_sz, f"Szenario_{sz.capitalize()}")
+                            wb_kk = openpyxl.load_workbook(_active_tpl_path(), data_only=True)
+                            kpis_sz = read_baseline_kpis(wb_kk)
+                            _, rpt_sz = generate_delta_report(f"Szenario_{sz.capitalize()}", applied_sz, kpis_sz, fp_sz)
+                            results[sz] = (fp_sz, rpt_sz)
+                        except Exception as e:
+                            st.error(f"Fehler bei '{sz}': {e}")
+
+                if results:
+                    st.success(f"{len(results)} Szenario(s) erstellt.")
+                    for sz, (fp_sz, rpt_sz) in results.items():
+                        with st.expander(f"📥 {sz.capitalize()} — {Path(fp_sz).name}"):
+                            with open(fp_sz, "rb") as fh:
+                                st.download_button(
+                                    f"⬇ {sz.capitalize()} herunterladen",
+                                    fh, Path(fp_sz).name,
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_{sz}",
+                                )
+                            st.text(rpt_sz)
 
     # ── Tab: Sandbox ──────────────────────────────────────────────────────────
     with tab_sandbox:
@@ -542,6 +702,15 @@ elif page == "Assistent":
 
     if not assistant_available:
         st.warning("Assistent-Modul nicht geladen. Stelle sicher, dass `scripts/model_assistant.py` existiert.")
+        st.stop()
+
+    # API-Key prüfen
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        st.warning(
+            "**Kein API-Key gesetzt.**\n\n"
+            "Gib deinen Anthropic API-Key in der **Sidebar links** ein (Feld 'API-Key').\n\n"
+            "Key besorgen: https://console.anthropic.com/settings/keys"
+        )
         st.stop()
 
     # Chat-History
