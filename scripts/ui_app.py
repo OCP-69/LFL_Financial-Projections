@@ -136,6 +136,25 @@ with st.sidebar:
     )
 
     st.divider()
+    st.markdown("**Anthropic API-Key**")
+    api_key_input = st.text_input(
+        "API-Key",
+        value=st.session_state.get("anthropic_api_key", ""),
+        type="password",
+        placeholder="sk-ant-api03-...",
+        label_visibility="collapsed",
+        help="Nur für den Assistent-Tab nötig. Key wird nur im Browser gespeichert, nie übertragen.",
+    )
+    if api_key_input:
+        st.session_state["anthropic_api_key"] = api_key_input
+        os.environ["ANTHROPIC_API_KEY"] = api_key_input
+        st.caption("Key gesetzt.")
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        st.caption("Key aus Umgebung geladen.")
+    else:
+        st.caption("Kein Key — Assistent inaktiv.")
+
+    st.divider()
     if st.button("Cache leeren / Neu laden", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -542,6 +561,15 @@ elif page == "Assistent":
 
     if not assistant_available:
         st.warning("Assistent-Modul nicht geladen. Stelle sicher, dass `scripts/model_assistant.py` existiert.")
+        st.stop()
+
+    # API-Key prüfen
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        st.warning(
+            "**Kein API-Key gesetzt.**\n\n"
+            "Gib deinen Anthropic API-Key in der **Sidebar links** ein (Feld 'API-Key').\n\n"
+            "Key besorgen: https://console.anthropic.com/settings/keys"
+        )
         st.stop()
 
     # Chat-History
