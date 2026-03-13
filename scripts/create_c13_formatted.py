@@ -25,9 +25,9 @@ import os
 # KONSTANTEN
 # ═══════════════════════════════════════════════════════════════════════════════
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCE    = os.path.join(BASE_DIR, '260312_LFL_BM_Vorlage_v19.xlsx')
+SOURCE    = os.environ.get('LFL_SOURCE_OVERRIDE') or os.path.join(BASE_DIR, '260312_LFL_BM_Vorlage_v19.xlsx')
 TS        = datetime.now().strftime('%Y%m%d_%H%M')
-OUTPUT    = os.path.join(BASE_DIR, f'LFL_BM_C13_v2_{TS}.xlsx')
+OUTPUT    = os.environ.get('LFL_OUTPUT_OVERRIDE') or os.path.join(BASE_DIR, f'LFL_BM_C13_v2_{TS}.xlsx')
 
 MONATE_DE = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez']
 PHASEN    = {
@@ -141,71 +141,112 @@ def freeze_row(ws, row=2):
 # ═══════════════════════════════════════════════════════════════════════════════
 # QUELLDATEN LADEN
 # ═══════════════════════════════════════════════════════════════════════════════
-print("Lade Quelldaten aus BM_Vorlage_v19 …")
-wb_src = openpyxl.load_workbook(SOURCE, data_only=True)
 
-ws_rev   = wb_src['4_Revenue']
-ws_pl    = wb_src['6_P&L']
-ws_cf    = wb_src['7_BS_CF']
-ws_costs = wb_src['5_Costs']
+# Szenario-Override via Umgebungsvariable (für normal/stark Berechnung)
+SZENARIO_OVERRIDE = os.environ.get('LFL_SZENARIO_OVERRIDE', '').strip().lower()
 
-# ── Aktives Szenario aus Quelldatei lesen ─────────────────────────────────────
-ws_scen   = wb_src['1_Szenario']
-ws_inp_src= wb_src['2_Inputs']
-SZENARIO_RAW   = str(ws_scen.cell(row=1, column=3).value or 'gering').strip().lower()
-SZENARIO_LABEL = SZENARIO_RAW.upper()   # "GERING" / "NORMAL" / "STARK"
-FIRMA          = str(ws_inp_src.cell(row=3, column=2).value or 'LoopforgeLab GmbH')
-STARTDATUM     = ws_inp_src.cell(row=4, column=2).value
-START_STR      = STARTDATUM.strftime('%d.%m.%Y') if hasattr(STARTDATUM, 'strftime') else '01.04.2026'
-WAEHRUNG       = str(ws_inp_src.cell(row=5, column=2).value or 'EUR')
+def read_row(ws, row_num, num=52):
+    return [float(ws.cell(row=row_num, column=2+i).value or 0) for i in range(num)]
+
+if SZENARIO_OVERRIDE in ('normal', 'stark'):
+    # Berechne Szenario via Python-Modell (openpyxl kann keine Formeln berechnen)
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from compute_model import build_model
+
+    print(f"Berechne Szenario '{SZENARIO_OVERRIDE}' via Python-Modell …")
+    _m = build_model(SOURCE, SZENARIO_OVERRIDE)
+
+    SZENARIO_RAW   = SZENARIO_OVERRIDE
+    SZENARIO_LABEL = SZENARIO_RAW.upper()
+    FIRMA          = _m['firma']
+    START_STR      = _m['start_str']
+    WAEHRUNG       = 'EUR'
+
+    total_revenue    = _m['total_revenue']
+    mrr              = _m['mrr']
+    arr              = _m['arr']
+    seats_sme        = [float(x) for x in _m['seats_sme']]
+    seats_mid        = [float(x) for x in _m['seats_mid']]
+    enterprise_count = [float(x) for x in _m['enterprise_count']]
+    impl_rev         = _m['impl_rev']
+    total_cogs       = _m['total_cogs']
+    gross_profit     = _m['gross_profit']
+    total_personnel  = _m['total_personnel']
+    total_tech       = _m['total_tech']
+    total_office     = _m['total_office']
+    total_prof       = _m['total_prof']
+    total_ins        = _m['total_ins']
+    total_mktg       = _m['total_mktg']
+    total_other      = _m['total_other']
+    total_opex       = _m['total_opex']
+    ebitda           = _m['ebitda']
+    net_income       = _m['net_income']
+    income_tax       = _m['income_tax']
+    equity_funding   = _m['equity_funding']
+    beginning_cash   = _m['beginning_cash']
+    ending_cash      = _m['ending_cash']
+    burn_rate        = _m['burn_rate']
+    runway_raw       = _m['runway']
+
+else:
+    # Standard: Lese gecachte Werte aus Quelldatei (gering-Szenario)
+    print("Lade Quelldaten aus BM_Vorlage_v19 …")
+    wb_src = openpyxl.load_workbook(SOURCE, data_only=True)
+
+    ws_rev   = wb_src['4_Revenue']
+    ws_pl    = wb_src['6_P&L']
+    ws_cf    = wb_src['7_BS_CF']
+    ws_costs = wb_src['5_Costs']
+
+    ws_scen   = wb_src['1_Szenario']
+    ws_inp_src= wb_src['2_Inputs']
+    SZENARIO_RAW   = str(ws_scen.cell(row=1, column=3).value or 'gering').strip().lower()
+    SZENARIO_LABEL = SZENARIO_RAW.upper()
+    FIRMA          = str(ws_inp_src.cell(row=3, column=2).value or 'LoopforgeLab GmbH')
+    STARTDATUM     = ws_inp_src.cell(row=4, column=2).value
+    START_STR      = STARTDATUM.strftime('%d.%m.%Y') if hasattr(STARTDATUM, 'strftime') else '01.04.2026'
+    WAEHRUNG       = str(ws_inp_src.cell(row=5, column=2).value or 'EUR')
+
+    total_revenue    = read_row(ws_rev, 32)
+    mrr              = read_row(ws_rev, 25)
+    arr              = read_row(ws_rev, 26)
+    seats_sme        = read_row(ws_rev,  8)
+    seats_mid        = read_row(ws_rev, 15)
+    enterprise_count = read_row(ws_rev, 21)
+    impl_rev         = read_row(ws_rev, 30)
+    total_cogs       = read_row(ws_pl, 14)
+    gross_profit     = read_row(ws_pl, 16)
+    total_personnel  = read_row(ws_costs, 13)
+    total_tech       = read_row(ws_costs, 18)
+    total_office     = read_row(ws_costs, 24)
+    total_prof       = read_row(ws_costs, 30)
+    total_ins        = read_row(ws_costs, 35)
+    total_mktg       = read_row(ws_costs, 40)
+    total_other      = read_row(ws_costs, 45)
+    total_opex       = read_row(ws_pl, 27)
+    ebitda           = read_row(ws_pl, 29)
+    net_income       = read_row(ws_pl, 37)
+    income_tax       = read_row(ws_pl, 35)
+    equity_funding   = read_row(ws_cf,  9)
+    beginning_cash   = read_row(ws_cf, 14)
+    ending_cash      = read_row(ws_cf, 15)
+    burn_rate        = read_row(ws_cf, 18)
+    runway_raw       = []
+    for i in range(52):
+        rv = ws_cf.cell(row=19, column=2+i).value
+        try:
+            runway_raw.append(float(rv))
+        except:
+            runway_raw.append(999.0 if str(rv) == '∞' else 0.0)
 
 # Szenario-Farbe für Farbakzent
 SZEN_COLOR = {"gering": "C00000", "normal": "2E75B6", "stark": "70AD47"}.get(SZENARIO_RAW, "595959")
 FILL_SZEN  = PatternFill("solid", fgColor=SZEN_COLOR)
 
-def read_row(ws, row_num, num=52):
-    return [float(ws.cell(row=row_num, column=2+i).value or 0) for i in range(num)]
-
-# ── Revenue ──────────────────────────────────────────────────────────────────
-total_revenue    = read_row(ws_rev, 32)   # Total Revenue
-mrr              = read_row(ws_rev, 25)   # MRR
-arr              = read_row(ws_rev, 26)   # ARR
-seats_sme        = read_row(ws_rev,  8)   # Active SME Seats
-seats_mid        = read_row(ws_rev, 15)   # Active Mid Seats
-enterprise_count = read_row(ws_rev, 21)   # Active Enterprise
-impl_rev         = read_row(ws_rev, 30)   # Implementation Support Revenue
-
-# ── P&L ──────────────────────────────────────────────────────────────────────
-total_cogs       = read_row(ws_pl, 14)    # TOTAL COGS
-gross_profit     = read_row(ws_pl, 16)    # GROSS PROFIT
-gross_margin     = [gp/r if r else 0.0 for gp, r in zip(gross_profit, total_revenue)]
-total_personnel  = read_row(ws_costs, 13) # TOTAL PERSONAL
-total_tech       = read_row(ws_costs, 18) # TOTAL TECHNOLOGIE
-total_office     = read_row(ws_costs, 24) # TOTAL BÜRO
-total_prof       = read_row(ws_costs, 30) # TOTAL PROFESSIONAL
-total_ins        = read_row(ws_costs, 35) # TOTAL VERSICHERUNG & BANK
-total_mktg       = read_row(ws_costs, 40) # TOTAL MARKETING & SALES
-total_other      = read_row(ws_costs, 45) # TOTAL SONSTIGE
-total_opex       = read_row(ws_pl, 27)    # TOTAL OPERATING EXPENSES
-ebitda           = read_row(ws_pl, 29)    # EBITDA
-ebitda_margin    = [e/r if r else 0.0 for e, r in zip(ebitda, total_revenue)]
-net_income       = read_row(ws_pl, 37)    # NET INCOME
-income_tax       = read_row(ws_pl, 35)    # Income Tax
-
-# ── Cash Flow ────────────────────────────────────────────────────────────────
-equity_funding   = read_row(ws_cf,  9)    # Equity Funding Received
-beginning_cash   = read_row(ws_cf, 14)    # Beginning Cash Balance
-ending_cash      = read_row(ws_cf, 15)    # ENDING CASH BALANCE
-burn_rate        = read_row(ws_cf, 18)    # Monthly Burn Rate
-runway_raw       = []
-for i in range(52):
-    rv = ws_cf.cell(row=19, column=2+i).value
-    try:
-        runway_raw.append(float(rv))
-    except:
-        runway_raw.append(999.0 if str(rv) == '∞' else 0.0)
-
 # ── Berechnete Größen ─────────────────────────────────────────────────────────
+gross_margin   = [gp/r if r else 0.0 for gp, r in zip(gross_profit, total_revenue)]
+ebitda_margin  = [e/r if r else 0.0 for e, r in zip(ebitda, total_revenue)]
 debtors    = [rev for rev in total_revenue]
 creditors  = [(total_cogs[i] + total_opex[i]) * 0.10 for i in range(52)]
 
