@@ -149,6 +149,20 @@ ws_pl    = wb_src['6_P&L']
 ws_cf    = wb_src['7_BS_CF']
 ws_costs = wb_src['5_Costs']
 
+# ── Aktives Szenario aus Quelldatei lesen ─────────────────────────────────────
+ws_scen   = wb_src['1_Szenario']
+ws_inp_src= wb_src['2_Inputs']
+SZENARIO_RAW   = str(ws_scen.cell(row=1, column=3).value or 'gering').strip().lower()
+SZENARIO_LABEL = SZENARIO_RAW.upper()   # "GERING" / "NORMAL" / "STARK"
+FIRMA          = str(ws_inp_src.cell(row=3, column=2).value or 'LoopforgeLab GmbH')
+STARTDATUM     = ws_inp_src.cell(row=4, column=2).value
+START_STR      = STARTDATUM.strftime('%d.%m.%Y') if hasattr(STARTDATUM, 'strftime') else '01.04.2026'
+WAEHRUNG       = str(ws_inp_src.cell(row=5, column=2).value or 'EUR')
+
+# Szenario-Farbe für Farbakzent
+SZEN_COLOR = {"gering": "C00000", "normal": "2E75B6", "stark": "70AD47"}.get(SZENARIO_RAW, "595959")
+FILL_SZEN  = PatternFill("solid", fgColor=SZEN_COLOR)
+
 def read_row(ws, row_num, num=52):
     return [float(ws.cell(row=row_num, column=2+i).value or 0) for i in range(num)]
 
@@ -837,10 +851,41 @@ MAP_COLS = [
     ("C13-Mapping-Regel",       42),
 ]
 
-ws_map.row_dimensions[1].height = 36
-ws_map.row_dimensions[2].height = 14  # Leerzeile nach Titel
+# ── Zeile 1: Szenario-Titelzeile ──────────────────────────────────────────────
+ws_map.row_dimensions[1].height = 30
+n_cols = len(MAP_COLS)
+
+# Szenario-Badge: Zellen A1 bis B1
+for col in range(1, 3):
+    c = ws_map.cell(row=1, column=col)
+    c.fill   = FILL_SZEN
+    c.border = HEADER_BORDER
+ws_map.cell(row=1, column=1).value     = f"SZENARIO: {SZENARIO_LABEL}"
+ws_map.cell(row=1, column=1).font      = Font(bold=True, color="FFFFFF", name="Calibri", size=13)
+ws_map.cell(row=1, column=1).alignment = ALIGN_LEFT
+ws_map.merge_cells(f"A1:B1")
+
+# Info-Block: Zellen C1..H1
+info_text = (
+    f"Quelldatei: {os.path.basename(SOURCE)}  │  "
+    f"Unternehmen: {FIRMA}  │  "
+    f"Start: {START_STR}  │  "
+    f"Währung: {WAEHRUNG}  │  "
+    f"Erstellt: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+)
+for col in range(3, n_cols + 1):
+    c = ws_map.cell(row=1, column=col)
+    c.fill   = PatternFill("solid", fgColor="F2F2F2")
+    c.border = HEADER_BORDER
+ws_map.cell(row=1, column=3).value     = info_text
+ws_map.cell(row=1, column=3).font      = Font(name="Calibri", size=10, color="404040")
+ws_map.cell(row=1, column=3).alignment = ALIGN_LEFT
+ws_map.merge_cells(f"C1:{get_column_letter(n_cols)}1")
+
+# ── Zeile 2: Spalten-Header ────────────────────────────────────────────────────
+ws_map.row_dimensions[2].height = 36
 for col_idx, (hdr, width) in enumerate(MAP_COLS, start=1):
-    style_header_cell(ws_map.cell(row=1, column=col_idx), hdr)
+    style_header_cell(ws_map.cell(row=2, column=col_idx), hdr)
     ws_map.column_dimensions[get_column_letter(col_idx)].width = width
 
 # ── Mapping-Daten ────────────────────────────────────────────────────────────
@@ -1122,7 +1167,7 @@ MAPPING_ROWS = [
 ]
 
 # ── Zeilen schreiben ───────────────────────────────────────────────────────
-data_row = 2
+data_row = 3  # Zeile 1 = Szenario-Titel, Zeile 2 = Header → Daten ab Zeile 3
 for entry in MAPPING_ROWS:
     ws_map.row_dimensions[data_row].height = 14
 
@@ -1174,7 +1219,7 @@ for r in range(2, data_row):
         ws_map.row_dimensions[r].height = 45  # Wrap-Text Zellen brauchen Höhe
 
 # Freeze
-freeze_row(ws_map, row=2)
+freeze_row(ws_map, row=3)  # Zeile 1 (Szenario) + Zeile 2 (Header) eingefroren
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
