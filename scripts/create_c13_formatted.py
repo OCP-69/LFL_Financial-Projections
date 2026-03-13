@@ -7,8 +7,9 @@ Sheets:
   1. Monthly       – 52 Zeilen, alle KPIs, einheitliches Euro-Format
   2. Annual        – 5 Zeilen (2026–2030), Jahresaggregate
   3. BalanceSheet  – 5 Zeilen, Bilanzpositionen
-  4. Grafiken      – 3 eingebettete Charts (Revenue/Cash/P&L)
+  4. Grafiken        – 4 eingebettete Charts (Revenue/Cash/P&L/Headcount)
   5. Investor_Slides – Ausgeführter Prompt mit echten Zahlen
+  6. Datenmapping    – Quelltabelle → Zieltabelle: jede Spalte mit Beschreibung
 """
 
 import openpyxl
@@ -817,6 +818,365 @@ note.font  = Font(italic=True, color="595959", name="Calibri", size=9)
 ws_inv.merge_cells(f"B{row_inv}:C{row_inv}")
 
 
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  SHEET 6: Datenmapping                                                   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+print("Erstelle Datenmapping-Sheet …")
+ws_map = wb.create_sheet("Datenmapping")
+ws_map.sheet_view.showGridLines = False
+
+# ── Spaltendefinitionen ────────────────────────────────────────────────────
+MAP_COLS = [
+    ("Ziel-Sheet",              16),
+    ("Ziel-Spalte",             20),
+    ("Was wird gemessen?",      42),
+    ("Quell-Sheet (v19)",       20),
+    ("Quell-Zeile / Variable",  30),
+    ("Formel / Logik",          50),
+    ("Einheit",                 10),
+    ("C13-Mapping-Regel",       42),
+]
+
+ws_map.row_dimensions[1].height = 36
+ws_map.row_dimensions[2].height = 14  # Leerzeile nach Titel
+for col_idx, (hdr, width) in enumerate(MAP_COLS, start=1):
+    style_header_cell(ws_map.cell(row=1, column=col_idx), hdr)
+    ws_map.column_dimensions[get_column_letter(col_idx)].width = width
+
+# ── Mapping-Daten ────────────────────────────────────────────────────────────
+# Format: (Ziel-Sheet, Ziel-Spalte, Was gemessen, Quell-Sheet, Quell-Zeile, Formel/Logik, Einheit, C13-Regel)
+MAPPING_ROWS = [
+    # ── MONTHLY ──────────────────────────────────────────────────────────────
+    ("── MONTHLY ──", "", "", "", "", "", "", ""),
+
+    ("Monthly", "Monat",
+     "Kalendermonat der Projektion (Apr 2026 = M1, Jul 2030 = M52)",
+     "—", "Berechnet",
+     "Startdatum 01.04.2026 + (m-1) Monate",
+     "Label", "Zeitachse des Modells"),
+
+    ("Monthly", "Phase",
+     "Finanzierungsphase des Unternehmens zum jeweiligen Monat",
+     "3_Roadmap", "Zeile 5–9",
+     "M1–4: Ideation | M5–16: Pre-Seed | M17–28: Seed | M29–40: Series A | M41–52: Series B",
+     "Text", "Gibt Kontext zur Burn-Rate-Entwicklung"),
+
+    ("Monthly", "Revenue €",
+     "Gesamtumsatz des Monats aus allen drei Revenue-Streams (Seats + Enterprise + Impl.-Support)",
+     "4_Revenue", "Zeile 32: 'Total Revenue (€/Monat)'",
+     "= SME-Revenue + Mid-Revenue + Enterprise-Revenue + Impl.-Support-Revenue",
+     "€/Monat", "→ C13: 'Revenue' und 'Cash in from Revenue' (Sofort-Zahlung angenommen)"),
+
+    ("Monthly", "MRR €",
+     "Monthly Recurring Revenue: Wiederkehrender Umsatz aus Seat-Abonnements (SME + Mid). Exklusive Einmal-Zahlungen.",
+     "4_Revenue", "Zeile 25: 'MRR – Monthly Recurring Revenue'",
+     "= Active SME-Seats × Seat-Preis + Active Mid-Seats × Mid-Preis",
+     "€/Monat", "SaaS-Kernmetrik: Zeigt skalierbare Umsatzbasis"),
+
+    ("Monthly", "Impl.-Support €",
+     "Einmalige Beratungserlöse aus der Kundeneinführung. Nicht wiederkehrend, aber zeigt Vertriebsaktivität.",
+     "4_Revenue", "Zeile 30: 'Impl.-Support Revenue (€/Monat)'",
+     "= Neue Kunden × Tagessatz × Tage/Kunde × Buchungsquote",
+     "€/Monat", "Services-Revenue; skaliert mit Neukunden"),
+
+    ("Monthly", "COGS €",
+     "Cost of Revenue: Variable Kosten, die direkt mit dem Umsatz entstehen (Hosting, KI-APIs, Payment).",
+     "6_P&L", "Zeile 14: 'TOTAL COGS'",
+     "= Cloud Hosting (variabel, pro Seat) + AI/ML API-Kosten + Payment Processing (2,5% vom Revenue)",
+     "€/Monat", "→ C13: 'CoR Cash Out'"),
+
+    ("Monthly", "Gross Profit €",
+     "Rohertrag: Was nach Abzug der direkten Herstellkosten vom Umsatz verbleibt.",
+     "6_P&L", "Zeile 16: 'GROSS PROFIT'",
+     "= Total Revenue − TOTAL COGS",
+     "€/Monat", "Basis für Gross-Margin-Berechnung"),
+
+    ("Monthly", "Gross Margin %",
+     "Prozentualer Anteil des Rohertrags am Umsatz. Zeigt Effizienz des Geschäftsmodells. SaaS-Benchmark: >70 %.",
+     "6_P&L", "Berechnet aus Zeilen 8 + 14",
+     "= Gross Profit / Total Revenue",
+     "%", "Unter 0 % = COGS übersteigen Umsatz (Früh­phase normal)"),
+
+    ("Monthly", "Personal €",
+     "Gesamte Personalkosten inkl. aller Sozialabgaben (AG-Brutto). Größter Einzelkostenblock.",
+     "5_Costs", "Zeile 13: 'TOTAL PERSONAL'",
+     "= Exec-Gehälter (phasenabhängig) + MA-Gehälter (ab Eintrittsmonat) × (1 + 3 % p.a.) + AG-SV 22 %",
+     "€/Monat", "→ Teil von C13: 'Operating Cash Out'"),
+
+    ("Monthly", "IT & Technik €",
+     "Cloud-Hosting (Basislast), AI/ML-APIs (für interne LFL-MA), SaaS-Tools und Lizenzen.",
+     "5_Costs", "Zeile 18: 'TOTAL TECHNOLOGIE'",
+     "= Cloud-Basis + AI/ML × MA-Anzahl + SaaS-Tools (phasenabhängig)",
+     "€/Monat", "→ Teil von C13: 'Operating Cash Out'"),
+
+    ("Monthly", "Total OpEx €",
+     "Gesamte operative Ausgaben (exkl. COGS): Personal, IT, Büro, Professional Services, Versicherungen, Marketing, Sonstiges.",
+     "6_P&L", "Zeile 27: 'TOTAL OPERATING EXPENSES'",
+     "= Personal + Technologie + Büro + Prof. Services + Versicherung + Marketing + Sonstiges",
+     "€/Monat", "→ C13: 'Operating Cash Out (incl R&D, upfront R&D)'"),
+
+    ("Monthly", "EBITDA €",
+     "Earnings Before Interest, Taxes, Depreciation & Amortization. Wichtigster Profitabilitätsindikator im Modell.",
+     "6_P&L", "Zeile 29: 'EBITDA'",
+     "= Gross Profit − Total OpEx",
+     "€/Monat", "Negativ in Frühphase (Investitionsphase), Trend zu 0 zeigt Skalierungseffekt"),
+
+    ("Monthly", "EBITDA Margin %",
+     "EBITDA als Anteil am Umsatz. SaaS-Benchmark profitabler Scale-ups: >20 %. Früh­phase: stark negativ.",
+     "6_P&L", "Berechnet aus Zeilen 29 + 8",
+     "= EBITDA / Total Revenue (bei Revenue = 0: 0 %)",
+     "%", "Zeigt operative Hebelwirkung bei Umsatzwachstum"),
+
+    ("Monthly", "Equity-Zufluss €",
+     "Im jeweiligen Monat eingegangene Eigenkapitalzahlungen (Investoren-Runden + Business Angels).",
+     "7_BS_CF", "Zeile 9: 'Equity Funding Received'",
+     "= Summe aller Finanzierungsrunden, die in diesem Monat fließen (aus 2_Inputs)",
+     "€/Monat", "→ C13: 'Other Cash In (equity, debt, grants)'"),
+
+    ("Monthly", "Eröffnungssaldo €",
+     "Cash-Bestand zu Beginn des Monats (= Schlusssaldo des Vormonats).",
+     "7_BS_CF", "Zeile 14: 'Beginning Cash Balance'",
+     "= Ending Cash[m-1]",
+     "€", "→ C13: 'Opening Cash'"),
+
+    ("Monthly", "Schlussstand Cash €",
+     "Liquiditätsbestand am Monatsende nach allen Ein- und Auszahlungen. Wichtigste Überlebensgröße.",
+     "7_BS_CF", "Zeile 15: 'ENDING CASH BALANCE'",
+     "= Eröffnungssaldo + Revenue + Equity − COGS − OpEx − Steuern",
+     "€", "→ C13: 'Closing Cash'. Negativ = Insolvenzrisiko (C13 Stress-Test)"),
+
+    ("Monthly", "Burn Rate €",
+     "Monatlicher Netto-Cash-Abfluss. Relevant für Runway-Berechnung und Investoren-Kommunikation.",
+     "7_BS_CF", "Zeile 18: 'Monthly Burn Rate'",
+     "= MAX(0, −NetChange in Cash) — nur positiv wenn Cash abnimmt",
+     "€/Monat", "Gross Burn = COGS + OpEx | Net Burn = inkl. Revenue-Eingang"),
+
+    ("Monthly", "Runway (Monate)",
+     "Wie viele Monate das Unternehmen mit dem aktuellen Cash-Bestand bei aktueller Burn Rate überleben kann.",
+     "7_BS_CF", "Zeile 19: 'Runway (Months)'",
+     "= Closing Cash / Burn Rate (∞ wenn Burn Rate = 0 oder positiv)",
+     "Monate", "< 6 = Warnung (C13-Alert). Investor-kritische Kennzahl"),
+
+    ("Monthly", "Headcount",
+     "Anzahl aktiver Mitarbeiter inkl. 3 Gründer. Basiert auf Einstellungsplan aus 2_Inputs.",
+     "2_Inputs", "Zeilen 175–195: Einstellungsplan (JA-Positionen)",
+     "3 Exec konstant + kumulierte JA-Einstellungen ab jeweiligem Eintrittsmonat",
+     "Personen", "AI-First: HC wächst nicht linear mit Revenue"),
+
+    ("Monthly", "Kum. Eigenkapital €",
+     "Summe aller Equity-Zuflüsse von M1 bis zum jeweiligen Monat (kumuliert).",
+     "7_BS_CF", "Berechnet: Σ Equity Funding Received M1..m",
+     "= Σ equity_funding[0..m]",
+     "€ kum.", "Zeigt gesamten Kapitaleinsatz der Investoren"),
+
+    ("Monthly", "Kum. Net Income €",
+     "Kumulierter Gewinn/Verlust von M1 bis zum jeweiligen Monat. Zeigt Gesamtverlauf der Profitabilität.",
+     "6_P&L", "Berechnet: Σ NET INCOME M1..m (Zeile 37)",
+     "= Σ net_income[0..m]",
+     "€ kum.", "Negativ = noch nicht profitabel; Trendwende zeigt Break-even"),
+
+    # ── ANNUAL ───────────────────────────────────────────────────────────────
+    ("", "", "", "", "", "", "", ""),
+    ("── ANNUAL ──", "", "", "", "", "", "", ""),
+
+    ("Annual", "Jahr",
+     "Kalenderjahr der aggregierten Projektion (2026 = Apr–Dez, 9 Monate; 2030 = Jan–Jul, 7 Monate).",
+     "—", "Berechnet", "Jahresblöcke: 2026 M1–M9 | 2027 M10–M21 | 2028 M22–M33 | 2029 M34–M45 | 2030 M46–M52",
+     "Jahr", "Basis für Investor-Reporting und Jahresabschluss"),
+
+    ("Annual", "Revenue €",
+     "Summe aller monatlichen Umsätze des Jahres. Wichtigste Top-Line-Kennzahl.",
+     "Monthly", "Σ Revenue über alle Monate des Jahres",
+     "= Σ total_revenue[s:e]",
+     "€/Jahr", "→ C13: 'Revenue' (Jahresaggregat)"),
+
+    ("Annual", "COGS €",
+     "Summe aller direkten Kosten des Jahres. Niedriger COGS-Anteil = hohes Skalierungspotenzial.",
+     "Monthly", "Σ COGS über alle Monate des Jahres",
+     "= Σ total_cogs[s:e]",
+     "€/Jahr", "→ C13: 'Cost of Revenue'"),
+
+    ("Annual", "Gross Profit €",
+     "Jährlicher Rohertrag: Revenue minus COGS. Basis für alle weiteren Profitabilitätsberechnungen.",
+     "Monthly", "Berechnet",
+     "= Σ Revenue − Σ COGS",
+     "€/Jahr", "→ C13: 'Gross Profit'"),
+
+    ("Annual", "Gross Margin %",
+     "Rohmarge: Anteil des Gross Profit am Jahresumsatz. SaaS-Reife ab ~70 %.",
+     "Annual", "Berechnet",
+     "= Gross Profit / Revenue",
+     "%", "Zeigt strukturelle Profitabilität des Geschäftsmodells"),
+
+    ("Annual", "Total OpEx €",
+     "Gesamte jährliche operative Kosten. Wächst langsamer als Revenue = operative Skalierung.",
+     "Monthly", "Σ Total OpEx über alle Monate des Jahres",
+     "= Σ total_opex[s:e] (Personal + IT + Büro + Prof.Services + Vers. + Mktg + Sonstiges)",
+     "€/Jahr", "→ C13: 'Total Opex (incl R&D amort)'"),
+
+    ("Annual", "EBITDA €",
+     "Operative Ertragskraft des Jahres. Hauptindikator für Investoren zur Bewertung der Skalierung.",
+     "Monthly", "Σ EBITDA über alle Monate des Jahres",
+     "= Gross Profit − Total OpEx",
+     "€/Jahr", "→ C13: 'EBIT' (da keine D&A separat modelliert)"),
+
+    ("Annual", "Net Profit €",
+     "Jahresüberschuss nach Steuern. Positiv = Break-even erreicht. Im Modell = EBITDA (keine Steuern in Verlustjahren).",
+     "Monthly", "Σ NET INCOME über alle Monate (Zeile 37 P&L)",
+     "= Σ net_income[s:e]",
+     "€/Jahr", "→ C13: 'Net Profit'"),
+
+    ("Annual", "Min. Cash-Stand €",
+     "Niedrigster Liquiditätsstand im Jahr. Wichtigster Risiko-Indikator (C13: 'Lowest Cash Balance').",
+     "Monthly", "MIN(Closing Cash aller Monate des Jahres)",
+     "= min(ending_cash[s:e])",
+     "€", "→ C13: 'Min Cash'. Negativ = Insolvenzrisiko im Jahresverlauf"),
+
+    ("Annual", "Ø Monatl. Burn €",
+     "Durchschnittlicher monatlicher Cash-Abfluss (Gross Burn). Basis für Runway-Planung.",
+     "Monthly", "Berechnet aus COGS + OpEx",
+     "= Σ(COGS + OpEx) / Anzahl Monate im Jahr",
+     "€/Monat", "→ C13: 'Avg Monthly Gross Burn (cash)'"),
+
+    ("Annual", "Cash Jahresende €",
+     "Liquiditätsbestand am letzten Monat des Jahres (Dezember bzw. letzter Monat bei unvollständigem Jahr).",
+     "Monthly", "Closing Cash des letzten Monats im Jahr",
+     "= ending_cash[e-1]",
+     "€", "→ C13: 'Cash (year-end)'"),
+
+    ("Annual", "Eigenkapital kum. €",
+     "Gesamtes bis Jahresende eingeflossenes Eigenkapital (alle Runden kumuliert).",
+     "Monthly", "Σ Equity-Zufluss M1 bis Jahresende",
+     "= Σ equity_funding[0..e]",
+     "€ kum.", "→ C13: 'Total Equity Investment'"),
+
+    ("Annual", "Net Income kum. €",
+     "Gesamtgewinn/-verlust von M1 bis Jahresende. Zeigt Gesamtkapitalbedarf.",
+     "Monthly", "Σ Net Income M1 bis Jahresende",
+     "= Σ net_income[0..e]",
+     "€ kum.", "→ C13: 'Cumulative Profit'"),
+
+    ("Annual", "Quick Ratio",
+     "Liquiditätskennzahl: Cash / Verbindlichkeiten. >1 = liquide. < 1 = Zahlungsrisiko.",
+     "Annual", "Berechnet",
+     "= Cash Jahresende / Kreditoren (= 10 % der Jahreskosten anteilig)",
+     "Ratio", "→ C13: 'Quick Ratio'. Investor-Sicherheitskennzahl"),
+
+    # ── BALANCESHEET ─────────────────────────────────────────────────────────
+    ("", "", "", "", "", "", "", ""),
+    ("── BALANCESHEET ──", "", "", "", "", "", "", ""),
+
+    ("BalanceSheet", "Cash €",
+     "Zahlungsmittelbestand zum Jahresende (= Closing Cash des letzten Monats im Jahr).",
+     "Monthly", "Closing Cash des Jahresabschlussmonats",
+     "= ending_cash[Jahr_Ende]",
+     "€", "→ C13: 'Cash'. Wichtigste Aktiv-Position"),
+
+    ("BalanceSheet", "Debitoren €",
+     "Ausstehende Kundenforderungen: Umsätze, die in Rechnung gestellt aber noch nicht bezahlt wurden.",
+     "Annual", "Revenue des letzten Monats im Jahr",
+     "= total_revenue[Jahr_Ende] (1 Monat ausstehend)",
+     "€", "→ C13: 'Debtors'. Zeigt Forderungsbestand"),
+
+    ("BalanceSheet", "R&D Immateriel €",
+     "Aktivierte Entwicklungskosten: Software-Entwicklung als immaterieller Vermögenswert (10 Jahre Abschreibung).",
+     "—", "Nicht modelliert (0 €)",
+     "Alle R&D-Kosten laufen durch OpEx. Empfehlung: Einmalige Entwicklungskosten hier aktivieren.",
+     "€", "→ C13: 'R&D Intangible'. Optimierungspotenzial für EBIT-Darstellung"),
+
+    ("BalanceSheet", "Kreditoren €",
+     "Ausstehende Verbindlichkeiten gegenüber Lieferanten: Kosten, die angefallen aber noch nicht bezahlt wurden.",
+     "Monthly", "Berechnet: 10 % der (COGS + OpEx) des Jahresabschlussmonats",
+     "= (total_cogs[e-1] + total_opex[e-1]) × 10 %",
+     "€", "→ C13: 'Creditors'. Passiv-Position, typisch 1 Monat Zahlungsziel"),
+
+    ("BalanceSheet", "Fremdkapital €",
+     "Ausstehende Kreditverbindlichkeiten (Bankdarlehen, Wandeldarlehen). Im Modell: 0 €.",
+     "—", "Nicht modelliert (0 €)",
+     "Kein Fremdkapital im Basismodell. Erweiterbar bei Venture Debt.",
+     "€", "→ C13: 'Debt'. Bei 0 = reine Eigenkapitalfinanzierung"),
+
+    ("BalanceSheet", "Net Assets €",
+     "Nettovermögen: Gesamtvermögen minus Verbindlichkeiten. Vereinfacht = Eigenkapital der Gesellschaft.",
+     "BalanceSheet", "Berechnet",
+     "= Cash + Debitoren + R&D − Kreditoren − Fremdkapital",
+     "€", "→ C13: 'Net Assets'. Zeigt Substanzwert"),
+
+    ("BalanceSheet", "Ges. EK-Investment €",
+     "Gesamtes eingezahltes Eigenkapital aller Investoren von Gründung bis Jahresende.",
+     "Monthly", "Σ Equity-Zuflüsse kumuliert bis Jahresende",
+     "= Σ equity_funding[0..Jahr_Ende]",
+     "€ kum.", "→ C13: 'Total Equity Investment'"),
+
+    ("BalanceSheet", "Kum. Net Income €",
+     "Kumulierter Gewinn/Verlust seit Gründung bis Jahresende. Zeigt Gesamtverlust der Investitionsphase.",
+     "Monthly", "Σ Net Income kumuliert bis Jahresende",
+     "= Σ net_income[0..Jahr_Ende]",
+     "€ kum.", "→ C13: 'Cumulative Profit'. Negativ = noch nicht amortisiert"),
+
+    ("BalanceSheet", "Quick Ratio",
+     "Kurzfristige Liquiditätskennzahl: Verhältnis von Cash zu kurzfristigen Verbindlichkeiten.",
+     "BalanceSheet", "Berechnet",
+     "= Cash / Kreditoren (bei Kreditoren = 0: Quick Ratio = 0)",
+     "Ratio", "→ C13: 'Quick Ratio'. >1 empfohlen für Zahlungssicherheit"),
+]
+
+# ── Zeilen schreiben ───────────────────────────────────────────────────────
+data_row = 2
+for entry in MAPPING_ROWS:
+    ws_map.row_dimensions[data_row].height = 14
+
+    if entry[0].startswith("──"):
+        # Abschnitts-Trennzeile
+        ws_map.row_dimensions[data_row].height = 20
+        c = ws_map.cell(row=data_row, column=1)
+        c.value = entry[0]
+        c.font  = Font(bold=True, color="FFFFFF", name="Calibri", size=10)
+        c.fill  = FILL_SUBHDR
+        c.alignment = ALIGN_LEFT
+        c.border = HEADER_BORDER
+        for col in range(2, len(MAP_COLS)+1):
+            ws_map.cell(row=data_row, column=col).fill = FILL_SUBHDR
+            ws_map.cell(row=data_row, column=col).border = HEADER_BORDER
+        data_row += 1
+        continue
+
+    if entry[0] == "":
+        # Leerzeile
+        ws_map.row_dimensions[data_row].height = 6
+        data_row += 1
+        continue
+
+    alt = (data_row % 2 == 0)
+    fill = FILL_ALT if alt else FILL_WHITE
+
+    for col_idx, val in enumerate(entry, start=1):
+        c = ws_map.cell(row=data_row, column=col_idx)
+        c.value = val
+        # Besondere Formatierung für erste Spalte (Ziel-Sheet)
+        if col_idx == 1:
+            c.font = Font(bold=True, name="Calibri", size=10, color="1F4E79")
+        elif col_idx == 2:
+            c.font = Font(bold=True, name="Calibri", size=10)
+        else:
+            c.font = FONT_NORMAL
+        c.fill = fill
+        c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        c.border = THIN_BORDER
+
+    ws_map.row_dimensions[data_row].height = None  # Auto-Höhe
+    data_row += 1
+
+# Row-Höhen für Textzellen anpassen (Wrap-Text braucht mehr Höhe)
+for r in range(2, data_row):
+    h = ws_map.row_dimensions[r].height
+    if h is None:
+        ws_map.row_dimensions[r].height = 45  # Wrap-Text Zellen brauchen Höhe
+
+# Freeze
+freeze_row(ws_map, row=2)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # WORKBOOK-EIGENSCHAFTEN
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -834,6 +1194,7 @@ ws_a.sheet_properties.tabColor   = "2E75B6"
 ws_bs.sheet_properties.tabColor  = "70AD47"
 ws_g.sheet_properties.tabColor   = "FFC000"
 ws_inv.sheet_properties.tabColor = "C00000"
+ws_map.sheet_properties.tabColor = "595959"
 
 wb.save(OUTPUT)
 print(f"\n✓ Datei gespeichert: {OUTPUT}")
