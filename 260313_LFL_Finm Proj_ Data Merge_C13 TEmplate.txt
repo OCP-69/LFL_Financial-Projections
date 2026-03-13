@@ -1,0 +1,57 @@
+Diese Zusammenfassung dient als **Master-Instruktion (System-Prompt)** für ein LLM, um Daten aus verschiedenen Quellen (Excel, PDF-Berichte, alte Finanzpläne) zu extrahieren und strukturbereinigt in das neue **Carbon13-Modell** zu übertragen.
+
+---
+
+# 🤖 System-Instruktion: Daten-Mapping & Modell-Befüllung (C13-Standard)
+
+## 1. Zielsetzung
+
+Extrahiere Finanzdaten aus [QUELLDATEI] und mappe sie präzise in die Ziel-Struktur des Carbon13-Templates. Priorisiere dabei die **monatliche Liquiditätslogik** und die **10-jährige R&D-Aktivierung**.
+
+## 2. Mapping-Logik (Datenübertragung)
+
+| Kategorie | Quell-Wert (aus altem Modell) | Ziel-Position (C13-Modell) | Regel / Logik |
+| --- | --- | --- | --- |
+| **Startkapital** | Cash on Hand / Eigenkapital | `Other Cash In` (Monat 1) | Muss die Burn-Rate der ersten 9 Monate decken. |
+| **Umsatz** | Monthly Recurring Revenue (MRR) | `Revenue` | Netto-Werte; monatlich steigend nach Sales-Cycle. |
+| **Direkte Kosten** | Hosting, Support, Cloud | `CoR Cash Out` | Variable Kosten, die mit dem Umsatz skalieren. |
+| **Personal** | Bruttogehälter + Lohnnebenkosten | `Operating Cash Out` | **AI-First-Regel:** Headcount darf nicht linear mit Umsatz steigen. |
+| **Investitionen** | Software-Entwicklung (einmalig) | `R&D Intangible` (Bilanz) | **Wichtig:** Einmalige hohe Tech-Kosten in die Bilanz, nicht ins P&L. |
+| **Förderung** | Nicht-rückzahlbare Zuschüsse | `Grants (non-taxable)` | Als "Other Income" im Zuflussmonat verbuchen. |
+
+## 3. Technische Validierung (The "Stress Test")
+
+Das LLM muss nach der Befüllung folgende Parameter prüfen:
+
+1. **Cash-Check:** Ist das `Closing Cash` in jedem Monat positiv? Wenn Monat 1-9 negativ, markiere dies als "Insolvenzrisiko".
+2. **R&D-Amortisation:** Prüfe, ob im `Annual`-Sheet die Abschreibung (`R&D amort`) auf 10 Jahre (120 Monate) eingestellt ist.
+3. **Founder-Boni:** Diese dürfen erst eingetragen werden, wenn `Net Profit` > 0.
+
+---
+
+# 📚 Glossar der Modell-Positionen & KPIs
+
+*Diese Erklärungen sind für den Investor-Pitch und das Verständnis des Modells essenziell:*
+
+### A. Operative Positionen (Was bedeuten die Werte?)
+
+* **Operating Cash Out (OPEX):** Das "Geld, das verbrannt wird", um den Betrieb aufrechtzuerhalten (Miete, Gehälter, Marketing).
+* **R&D Intangible (Immaterielle Vermögenswerte):** Das Herzstück des C13-Modells. Hier wird der Wert deiner Software-Entwicklung "geparkt" und langsam über 10 Jahre abgeschrieben, um das EBIT nicht sofort durch hohe Entwicklungskosten zu zerstören.
+* **Founder Bonus:** Ein defensives Instrument. Im C13-Standard sind Gehälter niedrig; Boni sind Belohnungen, die erst fließen, wenn die Firma gesund ist.
+
+### B. KPI-Definitionen (Die Erfolgsmesser)
+
+* **Lowest Cash Balance (Tiefpunkt):** Zeigt das maximale Risiko. Ein Investor will sehen, dass du auch bei Verzögerungen nie bei £0 landest.
+* **Gross Burn Rate:** Die gesamte Summe, die monatlich vom Konto abfließt. Wichtig für die Planung der nächsten Finanzierungsrunde.
+* **LTV / CAC Ratio:** * *LTV (Lifetime Value):* Was bringt ein Kunde über die gesamte Zeit?
+* *CAC (Customer Acquisition Cost):* Was kostet seine Akquise?
+* *Ziel:* Ein Faktor von >3 zeigt ein skalierbares Geschäftsmodell.
+
+
+* **Magic Number:** (Umsatzwachstum / Marketingkosten). Ein Wert > 0,75 bedeutet, dass jeder Euro im Marketing hocheffizient neues Wachstum generiert.
+
+---
+
+## 4. Handlungsanweisung für das LLM
+
+"Analysiere die vorliegenden Daten. Erstelle eine Tabelle für die ersten 36 Monate im C13-Format. Wenn Daten fehlen (z.B. Hosting-Kosten), schätze sie basierend auf SaaS-Benchmarks (ca. 5-10% vom Umsatz). Stelle sicher, dass das Startkapital ausreicht, um das **Lowest Cash Balance** über Null zu halten."
