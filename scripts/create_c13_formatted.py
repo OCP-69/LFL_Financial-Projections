@@ -1197,6 +1197,9 @@ for entry in MAPPING_ROWS:
 
     for col_idx, val in enumerate(entry, start=1):
         c = ws_map.cell(row=data_row, column=col_idx)
+        # Prevent Excel from interpreting strings starting with "=" as formulas
+        if isinstance(val, str) and val.startswith('='):
+            val = ' ' + val  # leading space forces Excel to treat as string, not formula
         c.value = val
         # Besondere Formatierung für erste Spalte (Ziel-Sheet)
         if col_idx == 1:
